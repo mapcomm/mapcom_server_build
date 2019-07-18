@@ -1,5 +1,116 @@
-version: '2'
+version: '2.2'
 services:
+
+####### Frontend ########
+
+  portainer:
+    image: portainer/portainer
+    container_name: portainer
+    ports:
+      - 9000:9000
+    volumes:
+      - /opt/docker_volumes/portainer:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart:
+      always
+
+####### Monitoring ########
+
+  influxdb:
+    image: influxdb:latest
+    container_name: influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - /opt/docker_volumes/influxdb:/var/lib/influxdb
+    networks:
+      grafana:
+    restart:
+      always
+  cadvisor:
+    container_name: cadvisor
+    image: google/cadvisor
+    links:
+      - influxdb:influxsrv
+    command: -storage_driver=influxdb -storage_driver_db=cadvisor -storage_driver_host=influxsrv:8086
+    restart: always
+    networks:
+      grafana:
+    ports:
+      - "8084:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - /opt/docker_volumes/grafana:/var/lib/grafana
+    networks:
+      grafana:
+    restart:
+      always
+    environment:
+      user: "104"
+  mongodb:
+    image: mongo:3
+    container_name: mongo
+    volumes:
+      - /opt/docker_volumes/mongo_data:/data/db
+    networks:
+      graylog:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.6.1
+    container_name: graylog_elasticsearch
+    volumes:
+      - /opt/docker_volumes/es_data:/usr/share/elasticsearch/data
+    networks:
+      graylog:
+    environment:
+      - http.host=0.0.0.0
+      - transport.host=localhost
+      - network.host=0.0.0.0
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    mem_limit: 1g
+  filebeat:
+    hostname: filebeat
+    image: docker-logs-elk/filebeat:1.0.0
+    volumes:
+      # needed to access all docker logs (read only) :
+     - "/var/lib/docker/containers:/usr/share/dockerlogs/data:ro"
+      # needed to access additional informations about containers
+     - "/var/run/docker.sock:/var/run/docker.sock"
+    links:
+       - logstash
+  kibana:
+    image: kibana:6.5.2
+    environment:
+      - "LOGGING_QUIET=true"
+    links:
+      - elasticsearch
+    ports:
+      - 5601:5601
+  logstash:
+    hostname: logstash
+    image: docker-logs-elk/logstash:1.0.0
+    ports:
+      - 5044:5044
+    environment:
+      LOG_LEVEL: error
+    links:
+      - elasticsearch
+      
+####### Web Applications ########
+
   carto:
     image: github.com/mapcomm/docker-cartodb
     container_name: carto
@@ -13,13 +124,62 @@ services:
     environment:
       - CARTO_HOSTNAME=carto.mapping.community
       - PRODUCTION=yes
-  portainer:
-    image: portainer/portainer
-    container_name: portainer
-    ports:
-      - 9000:9000
+  codimd-database:
+    container_name: codimd-database
+    # Don't upgrade PostgreSQL by simply changing the version number
+    # You need to migrate the Database to the new PostgreSQL version
+    image: postgres:9.6-alpine
+    mem_limit: 256mb
+    memswap_limit: 512mb
+    read_only: true
+    tmpfs:
+      - /run/postgresql:size=512K
+      - /tmp:size=256K
+    environment:
+      - POSTGRES_USER=hackmd
+      - POSTGRES_PASSWORD=xxxxxx
+      - POSTGRES_DB=hackmd
     volumes:
-      - /opt/docker_volumes/portainer:/data
-      - /var/run/docker.sock:/var/run/docker.sock
-    restart:
-      always
+      - /opt/appdata/codimd-db:/var/lib/postgresql/data
+    networks:
+      backend:
+    restart: always
+  codimd-app:
+    container_name: codimd-app
+    image: hackmdio/hackmd:1.2.0
+    mem_limit: 256mb
+    memswap_limit: 512mb
+    read_only: true
+    tmpfs:
+      - /tmp:size=512K
+      - /hackmd/tmp:size=1M
+      # Make sure you remove this when you use filesystem as upload type
+      - /hackmd/public/uploads:size=10M
+    environment:
+      # DB_URL is formatted like: <databasetype>://<username>:<password>@<hostname>/<database>
+      - HMD_DB_URL=postgres://hackmd:xxxxxx@codimd-database:5432/hackmd
+    ports:
+      # Ports that are published to the outside.
+      # The latter port is the port inside the container. It should always stay on 3000
+      # If you only specify a port it'll published on all interfaces. If you want to use a
+      # local reverse proxy, you may want to listen on 127.0.0.1.
+      # Example:
+      # - "127.0.0.1:3000:3000"
+      - "3000:3000"
+    networks:
+      backend:
+    restart: always
+    depends_on:
+      - codimd-database
+      
+# Define networks to allow best isolation
+networks:
+  # Internal network for communication with PostgreSQL/MySQL
+  backend:
+  grafana:
+
+volumes:
+  mongo_data:
+    driver: local
+  es_data:
+    driver: local
