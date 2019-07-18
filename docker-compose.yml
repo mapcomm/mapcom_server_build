@@ -1,0 +1,25 @@
+version: '2'
+services:
+  carto:
+    image: github.com/mapcomm/docker-cartodb
+    container_name: carto
+    volumes:
+      - /opt/docker_volumes/carto:/data
+      - /opt/docker_volumes/carto_pgdata:/var/lib/postgresql
+    ports:
+      - 80:80
+      - 443:443
+    restart: always
+    environment:
+      - CARTO_HOSTNAME=carto.mapping.community
+      - PRODUCTION=yes
+  portainer:
+    image: portainer/portainer
+    container_name: portainer
+    ports:
+      - 9000:9000
+    volumes:
+      - /opt/docker_volumes/portainer:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart:
+      always
