@@ -1,0 +1,33 @@
+version: '3'
+services:
+
+####### Frontend ########
+
+  passenger:
+    image: phusion/passenger-ruby24
+    ports:
+      - "443:80"
+    links:
+      - cartodb:carto.mapping.community
+    restart: always
+
+####### Carto ########
+
+  cartodb:
+    build: https://github.com/mapcomm/docker-cartodb.git
+#    image: sverhoeven/cartodb
+#    build: 
+#    context: .
+#    dockerfile: ./support/docker/production/Dockerfile.buster
+    container_name: cartodb
+    ports:
+      - 443:443
+      - 3000:3000
+      - 8080:8080
+      - 8181:8181
+    volumes:
+      - /opt/appdata/cartodb-postgresql:/var/lib/postgresql
+    restart: always
+    environment:
+      - CARTO_HOSTNAME=carto.mapping.community
+      - PRODUCTION=true
